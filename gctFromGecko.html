@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<head>
+<style>
+#ta{
+	height:10px;
+	position:fixed;
+	left:0px;
+	top:-20px;
+}
+.container{
+	text-align:center;
+}
+.comment{
+	margin:50px 0px;
+	padding:10px 20px;
+	border:dotted red 3px;
+	border-radius:18px;
+	font-size:32px;
+	font-weight:bold;
+	background-color:red;
+}
+.codeName{
+	width:99vw;
+	background-color:blue;
+	color:white;
+	font-weight:bold;
+	font-size:22px;
+	border:0;
+	border-radius:12px;
+	padding:6px 0px;
+	margin-top:20px;
+}
+.codeContent{
+	background-color:white;
+	color:black;
+	font-weight:bold;
+	font-size:16px;
+	border:2px solid purple;
+	border-radius:12px;
+	padding: 5px 9px;
+}
+.tailComment{
+	border-radius:56px 0px 56px 0px;
+	background-color:skyblue;
+	color:black;
+	font-weight:bold;
+	font-size:24px;
+	padding:20px 0px;
+	margin-bottom:40px;
+}
+.fileLoadBtn{
+	background-color:blue;
+	color:white;
+	border:0;
+	font-size:24px;
+	width:100%;
+	padding:5px 0px;
+	text-align:center;
+	font-weight:bold;
+}
+input[type=file], a{
+	display:none;
+}
+#saveBtn{
+	background-color:green;
+	color:white;
+	border:0;
+	font-size:24px;
+	width:100%;
+	padding:5px 0px;
+	text-align:center;
+	font-weight:bold;
+}
+.chexBox{
+	font-weight:bold;
+	font-size:24px;
+	border:4px solid black;
+	background-color:white;
+	display:inline;
+}
+</style>
+<script>
+var _ta;
+var _doc;
+var container;
+var checks = [];
+var gameID = "";
+var forceUpCaseBtn;
+var forceUpCaseBtnChecked = false;
+var zz = [];
+zz[70] = 15;
+zz[48] = 0;
+zz[49] = 1;
+zz[50] = 2;
+zz[51] = 3;
+zz[52] = 4;
+zz[53] = 5;
+zz[54] = 6;
+zz[55] = 7;
+zz[56] = 8;
+zz[57] = 9;
+zz[65] = 10;
+zz[66] = 11;
+zz[67] = 12;
+zz[68] = 13;
+zz[69] = 14;
+var readingFile = false;
+function hexToBin(hex){
+	var out = new Uint8Array(hex.length / 2); // 2 hex chars = 1 byte
+	for(var xint = 0, out_idx = 0, len = hex.length;xint < len;xint++){
+		var tmp = 0;
+		var _a = hex.charCodeAt(xint++);
+		var _b = hex.charCodeAt(xint);
+		tmp += (zz[_a] * 16) + zz[_b];
+		out[out_idx++] = tmp;
+	}
+	return out;
+}
+function save(){
+	var fname = gameID + ".gct";
+	// needs array as 1rst arg (like ["string"] instead of a var holding the str)
+	// but can use a Uint8Array as the array (still needs to be in array, or will be string xD)
+	var output = hexToBin(_ta.value);
+	var blob = new Blob([output], {type:'octet/stream'});
+	fout.download = fname;
+	fout.href = window.URL.createObjectURL(blob);
+	fout.click();
+	setTimeout(() => {
+		window.URL.revokeObjectURL(fout.href);
+		savingFile = false;
+	}, 100);
+}
+function ds(str){
+	window[str] = document.getElementById(str);
+}
+function init(){_ta=document.getElementById('ta');fout=document.getElementById('fout');
+ds('saveBtn');
+ds('_id');
+ds('_tit');
+ds('_doc');
+ds('forceUpCaseBtn');
+}
+// 8 chars 0-F, space, 8 chars 0-F <== that is hex line for these txt gecko codes
+function isHexLine(str){
+	if(str.length != 17) return false;
+	if(str.charAt(8) != " ") return false;
+	for(var xint = 0;xint < 8;xint++){
+		var c = str.charCodeAt(xint);
+		if(c < 48 || c > 70 || (c > 57 && c < 65)) return false;
+	}
+	for(var xint = 9;xint < 17;xint++){
+		var c = str.charCodeAt(xint);
+		if(c < 48 || c > 70 || (c > 57 && c < 65)) return false;
+	}
+	return true;
+}
+function readFile(){
+	if(!readingFile && fileInput.files && fileInput.files[0]){
+		var myFile = fileInput.files[0];
+		var reader = new FileReader();
+		readingFile = true;
+		reader.addEventListener('load', function(ev){
+			fileBuffer = ev.target.result;
+			readingFile = false;
+			
+			// got the file!
+			var lines;
+			if(forceUpCaseBtnChecked) lines = fileBuffer.toUpperCase().split('\r\n');
+			else lines = fileBuffer.split('\r\n'); // when pasting into console, \r\n bcomes \n, but reading from file it remains in original, \r\n for my notepad++-composed chinese text files
+			
+			// get game ID & title first 2 lines
+			if(lines.length > 0 && lines[0] != ""){
+				gameID = lines[0];
+				_id.innerText = lines[0];
+			}else{
+				alert('game ID expected on first line (data found too short/empty)');
+				return;
+			}
+			if(lines.length > 1 && lines[1] != "") _tit.innerText = lines[1];
+			else alert('game name expected on second line (data found too short/empty)');
+			
+			// look for codes & comments on per-line basis
+			// text then codes = toggleable code; text plus newline = title/comment
+			var lastLineCode = false;
+			var commentFollowsCode = false; // tail comments / *notes
+			var commentText = "";
+			var codeBlock = "";
+			_doc.innerHTML = "";
+			var codeLineCount = 0;
+			var div = document.createElement('div');
+			div.className = "container";
+			var lastCheck = undefined; // last [checks] obj
+			checks = [];
+			
+			// expecting first 3 lines to be gameID, title, empty line
+			// parse rest of lines
+			for(var xint = 3, l = lines.length;xint < l;xint++){
+				if(lines[xint] == ""){
+					if(lastLineCode){
+						if(lastCheck == undefined){
+							var x = document.createElement('div');
+							x.className = "codeName";
+							x.innerText = "< No Cheat Title >";
+							div.appendChild(x);
+							lastCheck = x;
+							checks.push(x);
+						}
+						var x = document.createElement('div');
+						x.className = "codeContent";
+						x.innerText = "" + codeLineCount + " lines of code";
+						div.appendChild(x);
+						lastCheck.code = codeBlock.replaceAll(" ","");
+						lastCheck.isActive = false;
+						lastCheck.onclick = function(){
+							if(this.isActive){
+								this.isActive = false;
+								this.style.backgroundColor = "blue";
+								this.style.color = "white";
+							}else{
+								this.isActive = true;
+								this.style.backgroundColor = "limegreen";
+								this.style.color = "black";
+							}
+						}
+						lastCheck = undefined;
+						lastLineCode = false;
+						codeLineCount = 0;
+						codeBlock = "";
+					}else if(commentText != ""){
+						var x = document.createElement('div');
+						if(commentFollowsCode) x.className = "tailComment";
+						else x.className = "comment";
+						x.innerText = commentText;
+						div.appendChild(x);
+						lastCheck = x;
+						checks.push(x);
+						commentText = "";
+					}
+				}else if(isHexLine(lines[xint])){
+					if(commentText != ""){
+						commentFollowsCode = false;
+						var x = document.createElement('div');
+						x.className = "codeName";
+						x.innerText = commentText;
+						div.appendChild(x);
+						commentText = "";
+						lastCheck = x;
+						checks.push(x);
+					}
+					lastLineCode = true;
+					codeLineCount++;
+					codeBlock += lines[xint];
+				}else{
+					if(lastLineCode){
+						var x = document.createElement('div');
+						x.className = "codeContent";
+						x.innerText = "" + codeLineCount + " lines of code";
+						div.appendChild(x);
+						if(lastCheck != undefined){
+							lastCheck.code = codeBlock.replaceAll(" ","");
+							lastCheck.isActive = false;
+							lastCheck.onclick = function(){
+								if(this.isActive){
+									this.isActive = false;
+									this.style.backgroundColor = "blue";
+									this.style.color = "white";
+								}else{
+									this.isActive = true;
+									this.style.backgroundColor = "limegreen";
+									this.style.color = "black";
+								}
+							}
+						}
+						codeBlock = "";
+						codeLineCount = 0;
+						lastLineCode = false;
+						commentText = "Note: " + lines[xint];
+						commentFollowsCode = true;
+					}else if(commentText != ""){
+						var x = document.createElement('div');
+						if(commentFollowsCode) x.className = "tailComment";
+						else x.className = "comment";
+						x.innerText = commentText;
+						div.appendChild(x);
+						commentText = lines[xint];
+					}else{
+						commentFollowsCode = false;
+						commentText = lines[xint];
+					}
+				}
+			}
+			
+			// same as empty line, finish if last line wasn't "" (usually hex line, or maybe tail comment)
+			if(lastLineCode){
+				if(lastCheck == undefined){
+					var x = document.createElement('div');
+					x.className = "codeName";
+					x.innerText = "< No Cheat Title >";
+					div.appendChild(x);
+					lastCheck = x;
+					checks.push(x);
+				}
+				var x = document.createElement('div');
+				x.className = "codeContent";
+				x.innerText = "" + codeLineCount + " lines of code";
+				div.appendChild(x);
+				lastCheck.code = codeBlock.replaceAll(" ","");
+				lastCheck.isActive = false;
+				lastCheck.onclick = function(){
+					if(this.isActive){
+						this.isActive = false;
+						this.style.backgroundColor = "blue";
+						this.style.color = "white";
+					}else{
+						this.isActive = true;
+						this.style.backgroundColor = "limegreen";
+						this.style.color = "black";
+					}
+				}
+				lastCheck = undefined;
+				lastLineCode = false;
+				codeLineCount = 0;
+				codeBlock = "";
+			}else if(commentText != ""){
+				var x = document.createElement('div');
+				if(commentFollowsCode) x.className = "tailComment";
+				else x.className = "comment";
+				x.innerText = commentFollowsCode ? "Note: " + commentText : commentText;
+				div.appendChild(x);
+				lastCheck = x;
+				checks.push(x);
+				commentText = "";
+			}
+
+			_doc.appendChild(div);
+		});
+		reader.readAsText(myFile);
+	}
+}
+function prep_save(){
+	if(checks.length < 1){alert('No codes active; to remove active cheats, please delete present .gct file');return;}
+	var prefix = "00D0C0DE00D0C0DE"; // first 8 bytes of .gct file, before codes
+	var suffix = "F000000000000000"; // last 8 bytes of .gct file, after code
+	var totalCode = ""; // payload, all active codes
+	for(var xint = 0, len = checks.length;xint < len;xint++){
+		if(checks[xint].isActive) totalCode += checks[xint].code;
+	}
+	if(totalCode != ""){
+		_ta.value = prefix + totalCode + suffix;
+		save();
+	}else{
+		alert('No codes active; to remove active cheats, please delete present .gct file');
+	}
+}
+function toggleForceUppercase(){
+	if(forceUpCaseBtnChecked){
+		forceUpCaseBtnChecked = false;
+		forceUpCaseBtn.innerHTML = "&#10008;";
+		forceUpCaseBtn.style.backgroundColor = "white";
+	}else{
+		forceUpCaseBtnChecked = true;
+		forceUpCaseBtn.innerHTML = "&#10004;";
+		forceUpCaseBtn.style.backgroundColor = "limegreen";
+	}
+}
+</script></head>
+<body onload='init()'>
+<noscript>I NEEDS MY JAVASCRIPT PLEASE :)</noscript>
+<textarea id='ta'></textarea>
+<label for='fileInput'>
+	<div class='fileLoadBtn'>
+		<input type='file' id='fileInput' onchange='readFile()'>Open txtcode .txt</input>
+	</div>
+</label>
+<br>
+<button onclick='prep_save()' id='saveBtn'>Save as .gct</button>
+<br><p>Please click the blue cheat code title to activate it, and click again to turn it off. Then just save the file into <b><i>sd:/codes/</i></b> for USB Loader GX Wii games, and into <b><i>usb:/codes/</i></b> for Nintendont GameCube games</p>
+<div onclick='toggleForceUppercase();' title='Some codes may not be in uppercase (ex. f0000000 instead of expected F0000000), and this webapp detects the line is a code by checking for uppercase; an easy fix is to change the entire file to uppercase; comments/names will also be shown in uppercase.'><div class="chexBox" id='forceUpCaseBtn'>&#10008;</div> Force uppercase when opening file (info in tooltip)</div><br>
+<a id='fout'></a>
+<h2 id='_id'></h2>
+<h1 id='_tit'></h1>
+<div id='_doc'>Please load a file</div>
+</body>
+</html>
